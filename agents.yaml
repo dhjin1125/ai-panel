@@ -1,0 +1,99 @@
+{
+  "timeout_seconds": 900,
+  "judge": "codex",
+  "presets": [
+    {
+      "id": "balanced",
+      "label": "Balanced - 기본 토론",
+      "mode": "debate",
+      "judge": "codex",
+      "models": {
+        "claude": "",
+        "gemini": "",
+        "codex": ""
+      }
+    },
+    {
+      "id": "fast",
+      "label": "Fast - 빠른 비교",
+      "mode": "ask",
+      "judge": "gemini",
+      "models": {
+        "claude": "sonnet",
+        "gemini": "gemini-2.5-flash",
+        "codex": "gpt-5.4-mini"
+      }
+    },
+    {
+      "id": "deep",
+      "label": "Deep - 깊은 검토",
+      "mode": "debate",
+      "judge": "claude",
+      "models": {
+        "claude": "opus",
+        "gemini": "gemini-2.5-pro",
+        "codex": "gpt-5.5"
+      }
+    }
+  ],
+  "agents": [
+    {
+      "id": "claude",
+      "default_model": "",
+      "model_arg": ["--model", "{model}"],
+      "models": [
+        {"id": "", "label": "CLI default - Claude CLI 자동 선택"},
+        {"id": "sonnet", "label": "Sonnet latest"},
+        {"id": "opus", "label": "Opus latest"}
+      ],
+      "command": [
+        "claude",
+        "--print",
+        "--output-format",
+        "text",
+        "--permission-mode",
+        "plan"
+      ]
+    },
+    {
+      "id": "gemini",
+      "default_model": "",
+      "model_arg": ["--model", "{model}"],
+      "models": [
+        {"id": "", "label": "CLI default - Gemini CLI 자동 선택"},
+        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"}
+      ],
+      "command": [
+        "gemini",
+        "--output-format",
+        "text",
+        "--approval-mode",
+        "plan",
+        "--prompt",
+        ""
+      ]
+    },
+    {
+      "id": "codex",
+      "default_model": "",
+      "model_arg": ["--model", "{model}"],
+      "models": [
+        {"id": "", "label": "CLI default - Codex CLI 자동 선택"},
+        {"id": "gpt-5.5", "label": "GPT-5.5"},
+        {"id": "gpt-5.4", "label": "GPT-5.4"},
+        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"}
+      ],
+      "command": [
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        "-"
+      ]
+    }
+  ]
+}

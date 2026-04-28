@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-panel-cli"
+version = "0.1.0"
+description = "Local CLI orchestrator for comparing Claude, Gemini, and Codex CLI responses."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+ai-panel = "ai_panel.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_panel"]
