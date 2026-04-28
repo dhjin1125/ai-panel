@@ -7,7 +7,7 @@ name = "ai-panel-cli"
 version = "0.1.0"
 description = "Local CLI orchestrator for comparing Claude, Gemini, and Codex CLI responses."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = "MIT"
 dependencies = []
 

@@ -26,8 +26,8 @@ class RunnerTest(unittest.TestCase):
             id="claude",
             command=["claude", "--print"],
             model_arg=["--model", "{model}"],
-            models=[ModelOption(id="", label="CLI default"), ModelOption(id="sonnet", label="Sonnet")],
-            default_model="",
+            models=[ModelOption(id="sonnet", label="Sonnet")],
+            default_model="sonnet",
         )
 
         self.assertEqual(
@@ -40,8 +40,8 @@ class RunnerTest(unittest.TestCase):
             id="codex",
             command=["codex", "exec", "-"],
             model_arg=["--model", "{model}"],
-            models=[ModelOption(id="", label="CLI default"), ModelOption(id="gpt-5.4", label="GPT-5.4")],
-            default_model="",
+            models=[ModelOption(id="gpt-5.4", label="GPT-5.4")],
+            default_model="gpt-5.4",
         )
 
         self.assertEqual(
@@ -55,10 +55,9 @@ class RunnerTest(unittest.TestCase):
             command=["gemini", "--output-format", "text", "--prompt", ""],
             model_arg=["--model", "{model}"],
             models=[
-                ModelOption(id="", label="CLI default"),
                 ModelOption(id="gemini-2.5-pro", label="Gemini 2.5 Pro"),
             ],
-            default_model="",
+            default_model="gemini-2.5-pro",
         )
 
         self.assertEqual(
@@ -70,9 +69,9 @@ class RunnerTest(unittest.TestCase):
         agent = AgentConfig(
             id="local",
             command=[sys.executable, "-c", "print('ok')"],
-            model_arg=["--model", "{model}"],
-            models=[ModelOption(id="", label="Default")],
-            default_model="",
+            model_arg=[],
+            models=[ModelOption(id="test-model", label="Test Model")],
+            default_model="test-model",
         )
         events = []
 

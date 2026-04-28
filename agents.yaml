@@ -4,29 +4,29 @@
   "presets": [
     {
       "id": "balanced",
-      "label": "Balanced - 기본 토론",
+      "label": "기본 토론",
       "mode": "debate",
       "judge": "codex",
       "models": {
-        "claude": "",
-        "gemini": "",
-        "codex": ""
+        "claude": "sonnet",
+        "gemini": "gemini-2.5-pro",
+        "codex": "gpt-5.5"
       }
     },
     {
       "id": "fast",
-      "label": "Fast - 빠른 비교",
+      "label": "빠른 비교",
       "mode": "ask",
       "judge": "gemini",
       "models": {
-        "claude": "sonnet",
+        "claude": "haiku",
         "gemini": "gemini-2.5-flash",
         "codex": "gpt-5.4-mini"
       }
     },
     {
       "id": "deep",
-      "label": "Deep - 깊은 검토",
+      "label": "깊은 토론",
       "mode": "debate",
       "judge": "claude",
       "models": {
@@ -39,10 +39,10 @@
   "agents": [
     {
       "id": "claude",
-      "default_model": "",
+      "default_model": "sonnet",
       "model_arg": ["--model", "{model}"],
       "models": [
-        {"id": "", "label": "CLI default - Claude CLI 자동 선택"},
+        {"id": "haiku", "label": "Haiku latest"},
         {"id": "sonnet", "label": "Sonnet latest"},
         {"id": "opus", "label": "Opus latest"}
       ],
@@ -57,12 +57,14 @@
     },
     {
       "id": "gemini",
-      "default_model": "",
+      "default_model": "gemini-2.5-pro",
       "model_arg": ["--model", "{model}"],
       "models": [
-        {"id": "", "label": "CLI default - Gemini CLI 자동 선택"},
+        {"id": "gemini-3-pro-preview", "label": "Gemini 3 Pro Preview"},
+        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash Preview"},
         {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
-        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"}
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+        {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite"}
       ],
       "command": [
         "gemini",
@@ -76,10 +78,9 @@
     },
     {
       "id": "codex",
-      "default_model": "",
+      "default_model": "gpt-5.5",
       "model_arg": ["--model", "{model}"],
       "models": [
-        {"id": "", "label": "CLI default - Codex CLI 자동 선택"},
         {"id": "gpt-5.5", "label": "GPT-5.5"},
         {"id": "gpt-5.4", "label": "GPT-5.4"},
         {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"}

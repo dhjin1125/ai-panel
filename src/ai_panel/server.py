@@ -5,6 +5,7 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import platform
 from pathlib import Path
 import secrets
@@ -25,12 +26,24 @@ from ai_panel.panel import run_ask, run_debate
 MAX_TOPIC_BYTES = 1_000_000
 MAX_ACTIVE_JOBS = 3
 MAX_JOBS_IN_MEMORY = 100
+STATUS_TIMEOUT_SECONDS = 8
 
 CONNECT_COMMANDS = {
-    "claude": ["claude", "auth"],
+    "claude": ["claude", "auth", "login"],
     "gemini": ["gemini"],
     "codex": ["codex", "login"],
 }
+
+CONNECT_PATHS = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    str(Path.home() / ".local/bin"),
+    "/Applications/cmux.app/Contents/Resources/bin",
+]
 
 STATUS_COMMANDS = {
     "claude": ["claude", "auth", "status"],
@@ -340,12 +353,12 @@ class PanelRequestHandler(BaseHTTPRequestHandler):
         if command is None:
             self._send_error(HTTPStatus.BAD_REQUEST, "이 agent는 연동 명령이 없습니다.")
             return
-        executable = command[0]
-        if shutil.which(executable) is None:
-            self._send_error(HTTPStatus.BAD_REQUEST, f"실행 파일을 찾을 수 없습니다: {executable}")
+        resolved_command = _resolve_connect_command(command)
+        if resolved_command is None:
+            self._send_error(HTTPStatus.BAD_REQUEST, f"실행 파일을 찾을 수 없습니다: {command[0]}")
             return
         try:
-            script_path = _write_connect_script(agent_id, command)
+            script_path = _write_connect_script(agent_id, resolved_command, command)
             if platform.system() == "Darwin":
                 subprocess.Popen(["open", str(script_path)])
             else:
@@ -448,15 +461,27 @@ class PanelRequestHandler(BaseHTTPRequestHandler):
                 meta_path = path / "meta.json"
                 topic_path = path / "topic.md"
                 mode = None
+                preset_label = None
                 topic = path.name
                 if meta_path.exists():
                     try:
-                        mode = json.loads(meta_path.read_text(encoding="utf-8")).get("mode")
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        mode = meta.get("mode")
+                        preset_label = meta.get("preset_label")
                     except json.JSONDecodeError:
                         mode = None
+                        preset_label = None
                 if topic_path.exists():
                     topic = _topic_label(topic_path.read_text(encoding="utf-8", errors="replace"))
-                runs.append({"id": path.name, "path": str(path), "mode": mode, "topic": topic})
+                runs.append(
+                    {
+                        "id": path.name,
+                        "path": str(path),
+                        "mode": mode,
+                        "preset_label": preset_label,
+                        "topic": topic,
+                    }
+                )
         return runs
 
     def _agent_statuses(self) -> list[dict]:
@@ -634,24 +659,68 @@ def _agent_health(agent_id: str, executable: str, runs_dir: Path) -> dict[str, s
 def _auth_status(agent_id: str) -> str:
     command = STATUS_COMMANDS.get(agent_id)
     if command is None:
-        return "unknown"
+        return _auth_status_fallback(agent_id) or "unknown"
     try:
+        resolved_command = _resolve_cli_command(command)
+        if resolved_command is None:
+            return _auth_status_fallback(agent_id) or "error"
         result = subprocess.run(
-            command,
+            resolved_command,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=STATUS_TIMEOUT_SECONDS,
             check=False,
+            env=_subprocess_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
-        return "error"
+        return _auth_status_fallback(agent_id) or "error"
 
     output = f"{result.stdout}\n{result.stderr}".lower()
     if agent_id == "claude" and '"loggedin":false' in output.replace(" ", ""):
         return "error"
     if result.returncode == 0:
         return "ok"
+    fallback = _auth_status_fallback(agent_id)
+    if fallback:
+        return fallback
     return "error"
+
+
+def _auth_status_fallback(agent_id: str) -> str | None:
+    if agent_id == "gemini":
+        return _gemini_auth_file_status()
+    if agent_id == "codex":
+        return _codex_auth_file_status()
+    return None
+
+
+def _gemini_auth_file_status() -> str | None:
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        return "ok"
+
+    auth_path = Path.home() / ".gemini" / "oauth_creds.json"
+    try:
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    has_refresh_token = bool(data.get("refresh_token"))
+    has_access_token = bool(data.get("access_token"))
+    return "ok" if has_refresh_token or has_access_token else None
+
+
+def _codex_auth_file_status() -> str | None:
+    auth_path = Path.home() / ".codex" / "auth.json"
+    try:
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    has_api_key = bool(data.get("OPENAI_API_KEY"))
+    has_tokens = isinstance(data.get("tokens"), dict) and bool(data["tokens"])
+    return "ok" if has_api_key or has_tokens else None
 
 
 def _recent_agent_result(runs_dir: Path, agent_id: str) -> str:
@@ -727,19 +796,53 @@ def _extract_failures(meta: dict) -> list[dict]:
     return failures
 
 
-def _write_connect_script(agent_id: str, command: list[str]) -> Path:
+def _connect_path_env() -> str:
+    paths = []
+    for raw_path in [*os.environ.get("PATH", "").split(os.pathsep), *CONNECT_PATHS]:
+        path = raw_path.strip()
+        if path and path not in paths:
+            paths.append(path)
+    return os.pathsep.join(paths)
+
+
+def _subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PATH"] = _connect_path_env()
+    return env
+
+
+def _resolve_cli_command(command: list[str]) -> list[str] | None:
+    executable_path = shutil.which(command[0], path=_connect_path_env())
+    if executable_path is None:
+        return None
+    return [str(Path(executable_path).resolve()), *command[1:]]
+
+
+def _resolve_connect_command(command: list[str]) -> list[str] | None:
+    return _resolve_cli_command(command)
+
+
+def _write_connect_script(
+    agent_id: str,
+    command: list[str],
+    display_command: list[str] | None = None,
+) -> Path:
     fd, raw_path = tempfile.mkstemp(
         prefix=f"ai-panel-connect-{agent_id}-",
         suffix=".command",
     )
     script_path = Path(raw_path)
     command_text = shlex.join(command)
+    display_text = shlex.join(display_command or command)
+    path_text = _connect_path_env()
+    display_line = shlex.quote(f"  {display_text}")
     script = f"""#!/usr/bin/env bash
 clear
+export PATH={shlex.quote(path_text)}
 echo "AI Panel - {agent_id} 연동"
 echo
 echo "실행할 명령:"
-echo "  {command_text}"
+printf '%s\\n' {display_line}
 echo
 {command_text}
 status=$?
@@ -891,10 +994,10 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 0 10px;
+      background: var(--surface);
       font-size: 13px;
       font-weight: 650;
       cursor: pointer;
-      background: var(--surface);
     }
     .mode-option input { margin: 0; }
     button {
@@ -1053,13 +1156,6 @@ INDEX_HTML = r"""<!doctype html>
     .model-select:focus {
       outline: 2px solid rgba(201, 100, 66, 0.16);
       border-color: var(--accent);
-    }
-    .model-help {
-      grid-column: 1 / -1;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-      margin-top: -2px;
     }
     .run-list {
       display: grid;
@@ -1378,14 +1474,11 @@ INDEX_HTML = r"""<!doctype html>
     <aside>
       <label for="topic">논제</label>
       <textarea id="topic" placeholder="여기에 비교하거나 토론시킬 논제를 입력하세요."></textarea>
-      <label for="presetSelect" class="control-label">프리셋</label>
-      <select id="presetSelect" class="control-select"></select>
-      <div class="mode-group" aria-label="실행 모드">
+      <label class="control-label">실행 방식</label>
+      <div class="mode-group" aria-label="실행 방식">
         <label class="mode-option"><input type="radio" name="mode" value="ask"> 비교</label>
         <label class="mode-option"><input type="radio" name="mode" value="debate" checked> 토론</label>
       </div>
-      <label for="judgeSelect" class="control-label">Judge</label>
-      <select id="judgeSelect" class="control-select"></select>
       <button id="runBtn" class="primary">실행</button>
       <div id="status" class="status">대기 중</div>
       <div id="jobSteps" class="job-steps"></div>
@@ -1412,13 +1505,10 @@ INDEX_HTML = r"""<!doctype html>
     const runsEl = document.querySelector("#runs");
     const agentsEl = document.querySelector("#agents");
     const resultEl = document.querySelector("#result");
-    const presetSelect = document.querySelector("#presetSelect");
-    const judgeSelect = document.querySelector("#judgeSelect");
 
     const apiToken = "__AI_PANEL_TOKEN__";
     let agentOrder = ["claude", "gemini", "codex"];
     let agentStatuses = [];
-    let presets = [];
     let defaultJudge = "";
 
     let currentRun = null;
@@ -1439,12 +1529,8 @@ INDEX_HTML = r"""<!doctype html>
       return document.querySelector('input[name="mode"]:checked').value;
     }
 
-    function selectedPresetId() {
-      return presetSelect.value || "";
-    }
-
     function selectedJudge() {
-      return judgeSelect.value || defaultJudge;
+      return defaultJudge;
     }
 
     function setStatus(text, kind = "") {
@@ -1471,6 +1557,12 @@ INDEX_HTML = r"""<!doctype html>
         setStatus("논제를 먼저 입력하세요.", "error");
         return;
       }
+      const models = selectedModels();
+      const missingModels = agentOrder.filter(agent => !models[agent]);
+      if (missingModels.length) {
+        setStatus(`모델을 선택하세요: ${missingModels.join(", ")}`, "error");
+        return;
+      }
       setBusy(true);
       setStatus(mode === "debate" ? "토론 실행 중..." : "비교 실행 중...", "warn");
       jobStepsEl.innerHTML = "";
@@ -1480,9 +1572,8 @@ INDEX_HTML = r"""<!doctype html>
           body: JSON.stringify({
             mode,
             topic: topicValue,
-            models: selectedModels(),
-            judge: selectedJudge(),
-            preset_id: selectedPresetId()
+            models,
+            judge: selectedJudge()
           })
         });
         pollJob(data.job.id);
@@ -1539,7 +1630,8 @@ INDEX_HTML = r"""<!doctype html>
       for (const run of data.runs) {
         const button = document.createElement("button");
         button.className = "run-item";
-        button.innerHTML = `${escapeHtml(run.topic || run.id)}<small>${escapeHtml(run.mode || "unknown")} · ${escapeHtml(run.id)}</small>`;
+        const runKind = run.preset_label || modeLabel(run.mode);
+        button.innerHTML = `${escapeHtml(run.topic || run.id)}<small>${escapeHtml(runKind)} · ${escapeHtml(run.id)}</small>`;
         button.onclick = () => loadRun(run.id);
         runsEl.appendChild(button);
       }
@@ -1547,20 +1639,13 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadConfig() {
       const data = await api("/api/config");
-      presets = data.presets || [];
       defaultJudge = data.judge || "";
       agentOrder = data.agents && data.agents.length ? data.agents : agentOrder;
-      presetSelect.innerHTML = presets.map(preset => `
-        <option value="${escapeAttr(preset.id)}">${escapeHtml(preset.label || preset.id)}</option>
-      `).join("");
-      judgeSelect.innerHTML = (data.judges || []).map(judge => `
-        <option value="${escapeAttr(judge)}" ${judge === defaultJudge ? "selected" : ""}>${escapeHtml(judge)}</option>
-      `).join("");
-      applyPresetDefaults();
     }
 
     async function loadAgents() {
       const data = await api("/api/agents");
+      const previousModels = selectedModels();
       agentStatuses = data.agents || [];
       agentOrder = agentStatuses.map(agent => agent.id);
       agentsEl.innerHTML = agentStatuses.map(agent => `
@@ -1573,16 +1658,14 @@ INDEX_HTML = r"""<!doctype html>
           <button class="connect-button" data-agent="${escapeAttr(agent.id)}" ${agent.installed ? "" : "disabled"}>연동</button>
           <select class="model-select" data-agent="${escapeAttr(agent.id)}">
             ${(agent.models || []).map(model => `
-              <option value="${escapeAttr(model.id)}" ${model.id === agent.default_model ? "selected" : ""}>${escapeHtml(model.label)}</option>
+              <option value="${escapeAttr(model.id)}" ${model.id === (previousModels[agent.id] || agent.default_model) ? "selected" : ""}>${escapeHtml(model.label)}</option>
             `).join("")}
           </select>
-          <div class="model-help">${escapeHtml(agent.id)}에서 CLI default는 ${escapeHtml(agent.id)} CLI가 현재 계정/설정 기준으로 자동 선택하는 모델입니다.</div>
         </div>
       `).join("");
       for (const button of agentsEl.querySelectorAll(".connect-button")) {
         button.onclick = () => connectAgent(button.dataset.agent);
       }
-      applyPresetDefaults();
     }
 
     async function connectAgent(agent) {
@@ -1597,23 +1680,10 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function applyPresetDefaults() {
-      const preset = presets.find(item => item.id === presetSelect.value);
-      if (!preset) return;
-      const modeInput = [...document.querySelectorAll('input[name="mode"]')]
-        .find(input => input.value === (preset.mode || "debate"));
-      if (modeInput) modeInput.checked = true;
-      const judgeOption = [...judgeSelect.options].find(option => option.value === preset.judge);
-      if (preset.judge && judgeOption) {
-        judgeSelect.value = preset.judge;
-      }
-      for (const select of agentsEl.querySelectorAll(".model-select")) {
-        const model = preset.models && preset.models[select.dataset.agent];
-        const option = [...select.options].find(item => item.value === model);
-        if (model !== undefined && option) {
-          select.value = model;
-        }
-      }
+    function modeLabel(mode) {
+      if (mode === "ask") return "비교";
+      if (mode === "debate") return "토론";
+      return mode || "unknown";
     }
 
     async function loadRun(runId) {
@@ -1637,7 +1707,7 @@ INDEX_HTML = r"""<!doctype html>
       const selected = (currentRun && currentRun.models && currentRun.models[agentId]) || "";
       const agent = agentStatuses.find(item => item.id === agentId);
       const option = agent && (agent.models || []).find(model => model.id === selected);
-      return option ? option.label : selected || "CLI default";
+      return option ? option.label : selected || "모델 미기록";
     }
 
     function renderRun() {
@@ -1678,9 +1748,8 @@ INDEX_HTML = r"""<!doctype html>
 
     function runMetaLine() {
       const parts = [
-        currentRun.mode || "unknown",
-        currentRun.preset_label ? `preset: ${currentRun.preset_label}` : null,
-        currentRun.judge ? `judge: ${currentRun.judge}` : null,
+        currentRun.preset_label || modeLabel(currentRun.mode),
+        currentRun.mode === "debate" && currentRun.judge ? `최종 정리: ${currentRun.judge}` : null,
         currentRun.id
       ].filter(Boolean);
       return parts.join(" · ");
@@ -1708,7 +1777,7 @@ INDEX_HTML = r"""<!doctype html>
       const round2Files = agentOrder.map(agent => roundFile(agent, "round2")).filter(Boolean);
       const round2 = round2Files.length ? renderAgentGrid("Round 2 상호 비판", "round2") : "";
       return `
-        ${summary ? `<div class="summary-box"><h3>최종 요약 <small>${escapeHtml(currentRun.judge ? `judge: ${currentRun.judge}` : "")}</small></h3><div class="markdown-body overview-doc">${renderMarkdown(summary.content)}</div></div>` : ""}
+        ${summary ? `<div class="summary-box"><h3>최종 요약 <small>${escapeHtml(currentRun.judge ? `최종 정리: ${currentRun.judge}` : "")}</small></h3><div class="markdown-body overview-doc">${renderMarkdown(summary.content)}</div></div>` : ""}
         ${round1}
         ${round2}
       `;
@@ -1909,11 +1978,10 @@ INDEX_HTML = r"""<!doctype html>
 
     runBtn.onclick = () => start(selectedMode());
     refreshBtn.onclick = loadRuns;
-    presetSelect.onchange = applyPresetDefaults;
 
     api("/api/health")
       .then(data => {
-        document.querySelector("#health").textContent = `agents: ${data.agents.join(", ")} · judge: ${data.judge}`;
+        document.querySelector("#health").textContent = `연동: ${data.agents.join(", ")}`;
       })
       .catch(error => {
         document.querySelector("#health").textContent = error.message;

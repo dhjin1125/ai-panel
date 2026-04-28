@@ -15,7 +15,13 @@ class ConfigTest(unittest.TestCase):
   "timeout_seconds": 12,
   "judge": "codex",
   "agents": [
-    {"id": "codex", "command": ["codex", "exec", "-"]}
+    {
+      "id": "codex",
+      "default_model": "test-model",
+      "models": [{"id": "test-model", "label": "Test Model"}],
+      "model_arg": [],
+      "command": ["codex", "exec", "-"]
+    }
   ]
 }
 """,
@@ -37,7 +43,13 @@ class ConfigTest(unittest.TestCase):
 {
   "judge": "missing",
   "agents": [
-    {"id": "codex", "command": ["codex", "exec", "-"]}
+    {
+      "id": "codex",
+      "default_model": "test-model",
+      "models": [{"id": "test-model", "label": "Test Model"}],
+      "model_arg": [],
+      "command": ["codex", "exec", "-"]
+    }
   ]
 }
 """,
@@ -55,7 +67,13 @@ class ConfigTest(unittest.TestCase):
 {
   "judge": "gemini",
   "agents": [
-    {"id": "gemini", "command": ["gemini", "--prompt", ""]}
+    {
+      "id": "gemini",
+      "default_model": "test-model",
+      "models": [{"id": "test-model", "label": "Test Model"}],
+      "model_arg": [],
+      "command": ["gemini", "--prompt", ""]
+    }
   ]
 }
 """,
@@ -79,17 +97,24 @@ class ConfigTest(unittest.TestCase):
       "label": "Deep",
       "mode": "debate",
       "judge": "claude",
-      "models": {"claude": "opus", "codex": ""}
+      "models": {"claude": "opus", "codex": "gpt-5.5"}
     }
   ],
   "agents": [
     {
       "id": "claude",
-      "default_model": "",
-      "models": [{"id": "", "label": "Default"}, {"id": "opus", "label": "Opus"}],
+      "default_model": "sonnet",
+      "models": [{"id": "sonnet", "label": "Sonnet"}, {"id": "opus", "label": "Opus"}],
+      "model_arg": [],
       "command": ["claude", "--print"]
     },
-    {"id": "codex", "command": ["codex", "exec", "-"]}
+    {
+      "id": "codex",
+      "default_model": "gpt-5.5",
+      "models": [{"id": "gpt-5.5", "label": "GPT-5.5"}],
+      "model_arg": [],
+      "command": ["codex", "exec", "-"]
+    }
   ]
 }
 """,
@@ -113,7 +138,36 @@ class ConfigTest(unittest.TestCase):
     {"id": "bad", "models": {"codex": "missing"}}
   ],
   "agents": [
-    {"id": "codex", "command": ["codex", "exec", "-"]}
+    {
+      "id": "codex",
+      "default_model": "gpt-5.5",
+      "models": [{"id": "gpt-5.5", "label": "GPT-5.5"}],
+      "model_arg": [],
+      "command": ["codex", "exec", "-"]
+    }
+  ]
+}
+""",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ConfigError):
+                load_config(config_path)
+
+    def test_rejects_empty_model_option(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "agents.yaml"
+            config_path.write_text(
+                """
+{
+  "judge": "codex",
+  "agents": [
+    {
+      "id": "codex",
+      "default_model": "gpt-5.5",
+      "models": [{"id": "", "label": "CLI default"}],
+      "command": ["codex", "exec", "-"]
+    }
   ]
 }
 """,

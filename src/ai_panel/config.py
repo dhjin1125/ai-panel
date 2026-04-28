@@ -101,13 +101,13 @@ def _parse_agent(raw: Any) -> AgentConfig:
         command.append(part)
     model_arg = _optional_str_list(raw, "model_arg", default=["--model", "{model}"])
     models = _parse_models(raw.get("models"))
-    default_model = raw.get("default_model", "")
-    if not isinstance(default_model, str):
-        raise ConfigError(f"{agent_id}.default_model은 string이어야 합니다.")
+    default_model = raw.get("default_model")
+    if not isinstance(default_model, str) or not default_model:
+        raise ConfigError(f"{agent_id}.default_model은 비어 있지 않은 string이어야 합니다.")
     model_ids = [model.id for model in models]
     if len(model_ids) != len(set(model_ids)):
         raise ConfigError(f"{agent_id}.models의 id는 중복될 수 없습니다.")
-    if default_model and default_model not in model_ids:
+    if default_model not in model_ids:
         raise ConfigError(f"{agent_id}.default_model이 models 목록에 없습니다.")
     return AgentConfig(
         id=agent_id,
@@ -146,20 +146,22 @@ def _optional_str_list(raw: dict[str, Any], key: str, default: list[str]) -> lis
 
 def _parse_models(raw: Any) -> list[ModelOption]:
     if raw is None:
-        return [ModelOption(id="", label="CLI default")]
+        raise ConfigError("models는 명시적으로 선택 가능한 모델 목록을 제공해야 합니다.")
     if not isinstance(raw, list) or not raw:
         raise ConfigError("models는 비어 있지 않은 list여야 합니다.")
     models = []
     for item in raw:
         if isinstance(item, str):
-            models.append(ModelOption(id=item, label=item or "CLI default"))
+            if not item:
+                raise ConfigError("models에는 빈 id를 사용할 수 없습니다.")
+            models.append(ModelOption(id=item, label=item))
             continue
         if not isinstance(item, dict):
             raise ConfigError("models 항목은 string 또는 object여야 합니다.")
         model_id = item.get("id")
         label = item.get("label", model_id)
-        if not isinstance(model_id, str):
-            raise ConfigError("models.id는 string이어야 합니다.")
+        if not isinstance(model_id, str) or not model_id:
+            raise ConfigError("models.id는 비어 있지 않은 string이어야 합니다.")
         if not isinstance(label, str) or not label:
             raise ConfigError("models.label은 비어 있지 않은 string이어야 합니다.")
         models.append(ModelOption(id=model_id, label=label))
@@ -175,7 +177,7 @@ def _parse_presets(
         return [
             PresetConfig(
                 id="balanced",
-                label="Balanced",
+                label="기본 토론",
                 mode="debate",
                 judge=default_judge,
                 models={},

@@ -2,36 +2,89 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-URL="${AI_PANEL_URL:-http://127.0.0.1:8765}"
+HOST="${AI_PANEL_HOST:-127.0.0.1}"
+START_PORT="${AI_PANEL_PORT:-8765}"
+URL="${AI_PANEL_URL:-}"
 LOG_DIR="${SCRIPT_DIR}/logs"
-LOG_FILE="${LOG_DIR}/server.log"
 
 mkdir -p "${LOG_DIR}"
 cd "${SCRIPT_DIR}"
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3를 찾을 수 없습니다. Python 3를 설치한 뒤 다시 실행해주세요." >&2
+  exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl을 찾을 수 없습니다. curl을 설치한 뒤 다시 실행해주세요." >&2
+  exit 1
+fi
+
 is_up() {
-  curl -fsS "${URL}/api/health" >/dev/null 2>&1
+  curl -fsS "$1/api/health" 2>/dev/null | grep -q '"ok": true'
 }
 
-if ! is_up; then
-  echo "AI Panel 서버를 시작합니다..."
-  nohup "${SCRIPT_DIR}/ai-panel" serve --no-open >"${LOG_FILE}" 2>&1 &
+port_free() {
+  python3 - "$HOST" "$1" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind((host, port))
+PY
+}
+
+start_server() {
+  local port="$1"
+  local url="http://${HOST}:${port}"
+  local log_file="${LOG_DIR}/server-${port}.log"
+
+  if is_up "${url}"; then
+    URL="${url}"
+    return 0
+  fi
+
+  if ! port_free "${port}"; then
+    return 1
+  fi
+
+  echo "AI Panel 서버를 시작합니다: ${url}"
+  nohup "${SCRIPT_DIR}/ai-panel" serve --host "${HOST}" --port "${port}" --no-open >"${log_file}" 2>&1 &
   for _ in {1..30}; do
-    if is_up; then
-      break
+    if is_up "${url}"; then
+      URL="${url}"
+      return 0
     fi
     sleep 0.5
   done
+
+  echo "포트 ${port} 서버 시작 로그: ${log_file}" >&2
+  tail -n 20 "${log_file}" 2>/dev/null >&2 || true
+  return 1
+}
+
+if [ -n "${URL}" ]; then
+  if ! is_up "${URL}"; then
+    echo "지정된 AI_PANEL_URL에 연결할 수 없습니다: ${URL}" >&2
+    exit 1
+  fi
+else
+  for port in $(seq "${START_PORT}" "$((START_PORT + 20))"); do
+    if start_server "${port}"; then
+      break
+    fi
+  done
 fi
 
-if is_up; then
+if [ -n "${URL}" ] && is_up "${URL}"; then
   echo "AI Panel을 엽니다: ${URL}"
   if ! open "${URL}" >/dev/null 2>&1; then
     echo "브라우저에서 직접 열어주세요: ${URL}"
   fi
 else
   echo "AI Panel 서버 시작에 실패했습니다."
-  echo "로그: ${LOG_FILE}"
-  tail -n 40 "${LOG_FILE}" 2>/dev/null || true
+  echo "로그 폴더: ${LOG_DIR}"
   exit 1
 fi
