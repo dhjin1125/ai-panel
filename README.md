@@ -56,6 +56,14 @@ cd ai-panel
 - `doctor`: 설정 파일과 CLI 설치 여부를 점검합니다.
 - `serve`: 로컬 웹 UI를 실행합니다.
 
+## 개발
+
+테스트는 레포 루트에서 아래 명령으로 실행합니다.
+
+```bash
+python3 -m unittest discover
+```
+
 ## 설정
 
 기본 설정은 `agents.yaml`에 있습니다. 이 파일은 YAML 파일명이지만 JSON-compatible YAML 문법을 사용합니다.
