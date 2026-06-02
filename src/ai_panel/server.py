@@ -1485,6 +1485,10 @@ INDEX_HTML = r"""<!doctype html>
         <label class="mode-option"><input type="radio" name="mode" value="ask"> 비교</label>
         <label class="mode-option"><input type="radio" name="mode" value="debate" checked> 토론</label>
       </div>
+      <label class="control-label" for="presetSelect">프리셋</label>
+      <select id="presetSelect" class="control-select"></select>
+      <label class="control-label" for="judgeSelect">최종 정리</label>
+      <select id="judgeSelect" class="control-select"></select>
       <button id="runBtn" class="primary">실행</button>
       <div id="status" class="status">대기 중</div>
       <div id="jobSteps" class="job-steps"></div>
@@ -1506,6 +1510,8 @@ INDEX_HTML = r"""<!doctype html>
     const topic = document.querySelector("#topic");
     const runBtn = document.querySelector("#runBtn");
     const refreshBtn = document.querySelector("#refreshBtn");
+    const presetSelect = document.querySelector("#presetSelect");
+    const judgeSelect = document.querySelector("#judgeSelect");
     const statusEl = document.querySelector("#status");
     const jobStepsEl = document.querySelector("#jobSteps");
     const runsEl = document.querySelector("#runs");
@@ -1516,6 +1522,8 @@ INDEX_HTML = r"""<!doctype html>
     let agentOrder = ["claude", "gemini", "codex"];
     let agentStatuses = [];
     let defaultJudge = "";
+    let presets = [];
+    let applyingPreset = false;
 
     let currentRun = null;
     let currentFiles = [];
@@ -1536,7 +1544,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function selectedJudge() {
-      return defaultJudge;
+      return judgeSelect.value || defaultJudge;
     }
 
     function setStatus(text, kind = "") {
@@ -1555,6 +1563,38 @@ INDEX_HTML = r"""<!doctype html>
         values[select.dataset.agent] = select.value;
       }
       return values;
+    }
+
+    function selectedPresetId() {
+      return presetSelect.value || null;
+    }
+
+    function activePreset() {
+      return presets.find(preset => preset.id === selectedPresetId()) || null;
+    }
+
+    function markCustomSelection() {
+      if (!applyingPreset) presetSelect.value = "";
+    }
+
+    function setMode(mode) {
+      const input = document.querySelector(`input[name="mode"][value="${mode}"]`);
+      if (input) input.checked = true;
+    }
+
+    function applyPreset(presetId) {
+      const preset = presets.find(item => item.id === presetId);
+      if (!preset) return;
+      applyingPreset = true;
+      setMode(preset.mode || "debate");
+      if (preset.judge) judgeSelect.value = preset.judge;
+      for (const select of agentsEl.querySelectorAll(".model-select")) {
+        const model = preset.models && preset.models[select.dataset.agent];
+        if (model && Array.from(select.options).some(option => option.value === model)) {
+          select.value = model;
+        }
+      }
+      applyingPreset = false;
     }
 
     async function start(mode, value) {
@@ -1579,7 +1619,8 @@ INDEX_HTML = r"""<!doctype html>
             mode,
             topic: topicValue,
             models,
-            judge: selectedJudge()
+            judge: selectedJudge(),
+            preset_id: selectedPresetId()
           })
         });
         pollJob(data.job.id);
@@ -1647,11 +1688,19 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api("/api/config");
       defaultJudge = data.judge || "";
       agentOrder = data.agents && data.agents.length ? data.agents : agentOrder;
+      presets = data.presets || [];
+      renderPresetOptions();
+      renderJudgeOptions(data.judges || data.agents || []);
+      if (presets.length) {
+        presetSelect.value = presets[0].id;
+        applyPreset(presetSelect.value);
+      }
     }
 
     async function loadAgents() {
       const data = await api("/api/agents");
       const previousModels = selectedModels();
+      const preset = activePreset();
       agentStatuses = data.agents || [];
       agentOrder = agentStatuses.map(agent => agent.id);
       agentsEl.innerHTML = agentStatuses.map(agent => `
@@ -1664,7 +1713,7 @@ INDEX_HTML = r"""<!doctype html>
           <button class="connect-button" data-agent="${escapeAttr(agent.id)}" ${agent.installed ? "" : "disabled"}>연동</button>
           <select class="model-select" data-agent="${escapeAttr(agent.id)}">
             ${(agent.models || []).map(model => `
-              <option value="${escapeAttr(model.id)}" ${model.id === (previousModels[agent.id] || agent.default_model) ? "selected" : ""}>${escapeHtml(model.label)}</option>
+              <option value="${escapeAttr(model.id)}" ${model.id === (previousModels[agent.id] || (preset && preset.models && preset.models[agent.id]) || agent.default_model) ? "selected" : ""}>${escapeHtml(model.label)}</option>
             `).join("")}
           </select>
         </div>
@@ -1672,6 +1721,23 @@ INDEX_HTML = r"""<!doctype html>
       for (const button of agentsEl.querySelectorAll(".connect-button")) {
         button.onclick = () => connectAgent(button.dataset.agent);
       }
+      for (const select of agentsEl.querySelectorAll(".model-select")) {
+        select.onchange = markCustomSelection;
+      }
+      if (preset) applyPreset(preset.id);
+    }
+
+    function renderPresetOptions() {
+      presetSelect.innerHTML = [
+        `<option value="">직접 선택</option>`,
+        ...presets.map(preset => `<option value="${escapeAttr(preset.id)}">${escapeHtml(preset.label || preset.id)}</option>`)
+      ].join("");
+    }
+
+    function renderJudgeOptions(judges) {
+      judgeSelect.innerHTML = judges.map(judge => `
+        <option value="${escapeAttr(judge)}" ${judge === defaultJudge ? "selected" : ""}>${escapeHtml(judge)}</option>
+      `).join("");
     }
 
     async function connectAgent(agent) {
@@ -1984,6 +2050,11 @@ INDEX_HTML = r"""<!doctype html>
 
     runBtn.onclick = () => start(selectedMode());
     refreshBtn.onclick = loadRuns;
+    presetSelect.onchange = () => applyPreset(presetSelect.value);
+    judgeSelect.onchange = markCustomSelection;
+    for (const input of document.querySelectorAll('input[name="mode"]')) {
+      input.onchange = markCustomSelection;
+    }
 
     api("/api/health")
       .then(data => {

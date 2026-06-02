@@ -76,6 +76,81 @@ class CliFlowTest(unittest.TestCase):
             self.assertNotIn("stderr", meta["round1"][0])
             self.assertIn("stdout_chars", meta["round1"][0])
 
+    def test_cli_applies_preset_and_model_overrides(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "agents.yaml"
+            topic_path = root / "topic.md"
+            runs_dir = root / "runs"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "timeout_seconds": 10,
+                        "judge": "agent_a",
+                        "presets": [
+                            {
+                                "id": "deep",
+                                "label": "Deep",
+                                "mode": "ask",
+                                "judge": "agent_b",
+                                "models": {
+                                    "agent_a": "model_a_deep",
+                                    "agent_b": "model_b_deep",
+                                },
+                            }
+                        ],
+                        "agents": [
+                            {
+                                "id": "agent_a",
+                                "default_model": "model_a_default",
+                                "models": [
+                                    {"id": "model_a_default", "label": "A Default"},
+                                    {"id": "model_a_deep", "label": "A Deep"},
+                                    {"id": "model_a_manual", "label": "A Manual"},
+                                ],
+                                "model_arg": [],
+                                "command": [sys.executable, "-c", "print('A')"],
+                            },
+                            {
+                                "id": "agent_b",
+                                "default_model": "model_b_default",
+                                "models": [
+                                    {"id": "model_b_default", "label": "B Default"},
+                                    {"id": "model_b_deep", "label": "B Deep"},
+                                ],
+                                "model_arg": [],
+                                "command": [sys.executable, "-c", "print('B')"],
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            topic_path.write_text("테스트 논제", encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "--config",
+                    str(config_path),
+                    "--runs-dir",
+                    str(runs_dir),
+                    "ask",
+                    str(topic_path),
+                    "--preset",
+                    "deep",
+                    "--model",
+                    "agent_a=model_a_manual",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            run_dir = next(runs_dir.iterdir())
+            meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(meta["preset_id"], "deep")
+            self.assertEqual(meta["judge"], "agent_b")
+            self.assertEqual(meta["models"]["agent_a"], "model_a_manual")
+            self.assertEqual(meta["models"]["agent_b"], "model_b_deep")
+
     def test_debate_uses_run_level_judge_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

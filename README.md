@@ -30,7 +30,7 @@ cd ai-panel
 ./open-ai-panel
 ```
 
-화면에서는 `논제`를 입력하고 `실행 방식`에서 `비교` 또는 `토론`을 고른 뒤, 각 CLI 행에서 사용할 모델을 직접 선택하고 `실행`을 누르면 됩니다. 기본 결과 화면은 Claude/Gemini/Codex 답변을 3컬럼으로 보여주고, 개별 md/json 탭을 누르면 원본 파일만 따로 볼 수 있습니다.
+화면에서는 `논제`를 입력하고 `실행 방식`에서 `비교` 또는 `토론`을 고른 뒤, 프리셋/최종 정리 모델/각 CLI 모델을 선택하고 `실행`을 누르면 됩니다. 기본 결과 화면은 Claude/Gemini/Codex 답변을 3컬럼으로 보여주고, 개별 md/json 탭을 누르면 원본 파일만 따로 볼 수 있습니다.
 
 특정 CLI가 실패하면 결과 화면에 실패한 모델과 직접 확인할 명령이 표시됩니다. 터미널에서 해당 CLI 로그인/세션을 확인한 뒤 `같은 토픽 다시 실행`을 누르면 됩니다.
 
@@ -45,6 +45,8 @@ cd ai-panel
 ```bash
 ./ai-panel ask topic.md
 ./ai-panel debate topic.md
+./ai-panel debate topic.md --preset deep
+./ai-panel debate topic.md --judge claude --model claude=opus --model gemini=gemini-2.5-pro
 ./ai-panel show <run-id>
 ./ai-panel doctor
 ./ai-panel serve

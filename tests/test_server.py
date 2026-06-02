@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from ai_panel.server import _allowed_origins, _auth_status, _resolve_connect_command, _write_connect_script
+from ai_panel.server import (
+    _allowed_origins,
+    _auth_status,
+    _index_html,
+    _resolve_connect_command,
+    _write_connect_script,
+)
 
 
 class ServerHelperTest(unittest.TestCase):
@@ -90,6 +96,13 @@ class ServerHelperTest(unittest.TestCase):
 
             with patch("ai_panel.server.Path.home", return_value=home):
                 self.assertEqual("ok", _auth_status("gemini"))
+
+    def test_index_exposes_preset_and_judge_controls(self):
+        html = _index_html("test-token")
+
+        self.assertIn('id="presetSelect"', html)
+        self.assertIn('id="judgeSelect"', html)
+        self.assertIn("preset_id: selectedPresetId()", html)
 
 
 if __name__ == "__main__":

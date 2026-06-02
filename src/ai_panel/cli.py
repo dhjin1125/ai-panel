@@ -53,10 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     ask_parser = subparsers.add_parser("ask", help="독립 답변만 생성합니다.")
     ask_parser.add_argument("topic", type=Path)
+    _add_run_options(ask_parser)
     ask_parser.set_defaults(func=ask_command)
 
     debate_parser = subparsers.add_parser("debate", help="독립 답변, 비판, 요약을 생성합니다.")
     debate_parser.add_argument("topic", type=Path)
+    _add_run_options(debate_parser)
     debate_parser.set_defaults(func=debate_command)
 
     show_parser = subparsers.add_parser("show", help="저장된 run의 파일 경로를 출력합니다.")
@@ -82,7 +84,15 @@ def build_parser() -> argparse.ArgumentParser:
 def ask_command(args: argparse.Namespace) -> int:
     config = _load_panel_config(args)
     topic = _read_topic(args.topic)
-    panel_run = run_ask(config, topic, args.runs_dir, str(args.topic))
+    panel_run = run_ask(
+        config,
+        topic,
+        args.runs_dir,
+        str(args.topic),
+        _parse_model_overrides(args.model),
+        args.judge,
+        args.preset,
+    )
     print(panel_run.run_dir)
     return panel_run.exit_code
 
@@ -90,7 +100,15 @@ def ask_command(args: argparse.Namespace) -> int:
 def debate_command(args: argparse.Namespace) -> int:
     config = _load_panel_config(args)
     topic = _read_topic(args.topic)
-    panel_run = run_debate(config, topic, args.runs_dir, str(args.topic))
+    panel_run = run_debate(
+        config,
+        topic,
+        args.runs_dir,
+        str(args.topic),
+        _parse_model_overrides(args.model),
+        args.judge,
+        args.preset,
+    )
     print(panel_run.run_dir)
     return panel_run.exit_code
 
@@ -130,6 +148,26 @@ def serve_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_run_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--preset",
+        default=None,
+        help="agents.yaml의 preset id를 적용합니다.",
+    )
+    parser.add_argument(
+        "--judge",
+        default=None,
+        help="토론 최종 정리 agent id를 지정합니다.",
+    )
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        metavar="AGENT=MODEL",
+        help="agent별 모델을 지정합니다. 여러 번 사용할 수 있습니다.",
+    )
+
+
 def _load_panel_config(args: argparse.Namespace) -> PanelConfig:
     config = load_config(_config_path(args))
     if args.timeout is not None:
@@ -146,6 +184,20 @@ def _load_panel_config(args: argparse.Namespace) -> PanelConfig:
 
 def _config_path(args: argparse.Namespace) -> Path:
     return args.config or default_config_path()
+
+
+def _parse_model_overrides(values: list[str]) -> dict[str, str]:
+    models = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError("--model은 AGENT=MODEL 형식이어야 합니다.")
+        agent_id, model = value.split("=", 1)
+        agent_id = agent_id.strip()
+        model = model.strip()
+        if not agent_id or not model:
+            raise ValueError("--model은 AGENT=MODEL 형식이어야 합니다.")
+        models[agent_id] = model
+    return models
 
 
 def _read_topic(path: Path) -> str:
