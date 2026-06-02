@@ -72,6 +72,9 @@ class CliFlowTest(unittest.TestCase):
             meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
             self.assertIn("steps", meta)
             self.assertIn("format_checks", meta)
+            self.assertNotIn("stdout", meta["round1"][0])
+            self.assertNotIn("stderr", meta["round1"][0])
+            self.assertIn("stdout_chars", meta["round1"][0])
 
     def test_debate_uses_run_level_judge_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -109,6 +112,36 @@ class CliFlowTest(unittest.TestCase):
 
         self.assertEqual(panel_run.meta["judge"], "judge_b")
         self.assertEqual(panel_run.meta["summary"]["agent_id"], "judge_b")
+        self.assertNotIn("stdout", panel_run.meta["summary"])
+
+    def test_successful_stderr_is_not_step_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runs_dir = root / "runs"
+            config = PanelConfig(
+                agents=[
+                    AgentConfig(
+                        id="noisy",
+                        command=[
+                            sys.executable,
+                            "-c",
+                            "import sys; print('ok'); print('debug log', file=sys.stderr)",
+                        ],
+                        model_arg=[],
+                        models=[ModelOption(id="test-model", label="Test Model")],
+                        default_model="test-model",
+                    )
+                ],
+                judge="noisy",
+                timeout_seconds=10,
+                presets=[],
+            )
+
+            panel_run = run_debate(config, "테스트 논제", runs_dir, "test")
+
+        self.assertEqual(panel_run.exit_code, 0)
+        self.assertIsNone(panel_run.meta["steps"][0]["error"])
+        self.assertEqual(panel_run.meta["round1"][0]["stderr_chars"], len("debug log"))
 
 
 if __name__ == "__main__":

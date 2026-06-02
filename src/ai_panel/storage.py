@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime
 import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ai_panel.runner import RunResult
+
+META_PREVIEW_CHARS = 500
+COMMAND_PART_PREVIEW_CHARS = 160
 
 
 def make_run_dir(runs_dir: Path) -> Path:
@@ -73,4 +75,35 @@ def write_meta(path: Path, payload: dict) -> None:
 
 
 def result_meta(results: list[RunResult]) -> list[dict]:
-    return [asdict(result) for result in results]
+    return [_result_meta(result) for result in results]
+
+
+def _result_meta(result: RunResult) -> dict:
+    meta = {
+        "agent_id": result.agent_id,
+        "model": result.model,
+        "command": [_command_part_meta(part) for part in result.command],
+        "stdout_chars": len(result.stdout),
+        "stderr_chars": len(result.stderr),
+        "exit_code": result.exit_code,
+        "duration_ms": result.duration_ms,
+        "timed_out": result.timed_out,
+        "error": result.error,
+    }
+    if not result.ok and result.stdout:
+        meta["stdout_preview"] = _preview(result.stdout)
+    if not result.ok and result.stderr:
+        meta["stderr_preview"] = _preview(result.stderr)
+    return meta
+
+
+def _command_part_meta(part: str) -> str:
+    if "\n" in part or len(part) > COMMAND_PART_PREVIEW_CHARS:
+        return f"<redacted {len(part)} chars>"
+    return part
+
+
+def _preview(value: str) -> str:
+    if len(value) <= META_PREVIEW_CHARS:
+        return value
+    return value[:META_PREVIEW_CHARS] + "..."

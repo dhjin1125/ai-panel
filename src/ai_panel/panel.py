@@ -19,6 +19,9 @@ from ai_panel.storage import (
 )
 
 
+STEP_ERROR_PREVIEW_CHARS = 500
+
+
 StatusCallback = Callable[[str, str, str, dict], None]
 
 
@@ -240,6 +243,9 @@ def steps_meta(results_by_stage: dict[str, list[RunResult]]) -> list[dict]:
     steps = []
     for stage, results in results_by_stage.items():
         for result in results:
+            error = None
+            if not result.ok:
+                error = _preview_step_error(result.error or result.stderr or None)
             steps.append(
                 {
                     "stage": stage,
@@ -249,10 +255,18 @@ def steps_meta(results_by_stage: dict[str, list[RunResult]]) -> list[dict]:
                     "duration_ms": result.duration_ms,
                     "exit_code": result.exit_code,
                     "timed_out": result.timed_out,
-                    "error": result.error or result.stderr or None,
+                    "error": error,
                 }
             )
     return steps
+
+
+def _preview_step_error(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= STEP_ERROR_PREVIEW_CHARS:
+        return value
+    return value[:STEP_ERROR_PREVIEW_CHARS] + "..."
 
 
 def format_checks(results_by_stage: dict[str, list[RunResult]]) -> dict:

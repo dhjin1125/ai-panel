@@ -777,7 +777,10 @@ def _extract_failures(meta: dict) -> list[dict]:
                     "section": section,
                     "exit_code": item.get("exit_code"),
                     "timed_out": item.get("timed_out"),
-                    "error": item.get("error") or item.get("stderr") or "실행 실패",
+                    "error": item.get("error")
+                    or item.get("stderr_preview")
+                    or item.get("stderr")
+                    or "실행 실패",
                 }
             )
     summary = meta.get("summary")
@@ -790,7 +793,10 @@ def _extract_failures(meta: dict) -> list[dict]:
                     "section": "summary",
                     "exit_code": summary.get("exit_code"),
                     "timed_out": summary.get("timed_out"),
-                    "error": summary.get("error") or summary.get("stderr") or "요약 실패",
+                    "error": summary.get("error")
+                    or summary.get("stderr_preview")
+                    or summary.get("stderr")
+                    or "요약 실패",
                 }
             )
     return failures
