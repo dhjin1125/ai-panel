@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from ai_panel.config import PanelConfig, PresetConfig
+from ai_panel.config import PanelConfig, preset_by_id, selected_judge, selected_models
 from ai_panel.prompts import check_format, critique_prompt, independent_prompt, summary_prompt
 from ai_panel.runner import RunResult, run_agent, run_many
 from ai_panel.storage import (
@@ -42,13 +42,14 @@ def run_ask(
     preset_id: str | None = None,
     status_callback: StatusCallback | None = None,
 ) -> PanelRun:
+    preset = preset_by_id(config, preset_id, required=True)
+    models = selected_models(config, model_by_agent, preset)
+    judge = selected_judge(config, judge_id, preset, required=True)
+
     run_dir = make_run_dir(runs_dir)
     write_text(run_dir / "topic.md", topic)
 
-    preset = _preset_by_id(config, preset_id)
-    selected_models = _selected_models(config, model_by_agent, preset)
-    judge = _selected_judge(config, judge_id, preset)
-    results = asyncio.run(_run_round1(config, topic, selected_models, status_callback))
+    results = asyncio.run(_run_round1(config, topic, models, status_callback))
     for result in results:
         write_result(run_dir / "round1" / f"{result.agent_id}.md", result)
 
@@ -60,7 +61,7 @@ def run_ask(
         "preset_id": preset.id if preset else None,
         "preset_label": preset.label if preset else None,
         "judge": judge,
-        "models": selected_models,
+        "models": models,
         "round1": result_meta(results),
         "steps": steps_meta(results_by_stage),
         "format_checks": format_checks(results_by_stage),
@@ -79,13 +80,14 @@ def run_debate(
     preset_id: str | None = None,
     status_callback: StatusCallback | None = None,
 ) -> PanelRun:
+    preset = preset_by_id(config, preset_id, required=True)
+    models = selected_models(config, model_by_agent, preset)
+    judge = selected_judge(config, judge_id, preset, required=True)
+
     run_dir = make_run_dir(runs_dir)
     write_text(run_dir / "topic.md", topic)
 
-    preset = _preset_by_id(config, preset_id)
-    selected_models = _selected_models(config, model_by_agent, preset)
-    judge = _selected_judge(config, judge_id, preset)
-    round1_results = asyncio.run(_run_round1(config, topic, selected_models, status_callback))
+    round1_results = asyncio.run(_run_round1(config, topic, models, status_callback))
     for result in round1_results:
         write_result(run_dir / "round1" / f"{result.agent_id}.md", result)
 
@@ -102,7 +104,7 @@ def run_debate(
                 config.agents,
                 prompt_by_agent,
                 config.timeout_seconds,
-                selected_models,
+                models,
                 "round2",
                 status_callback,
             )
@@ -117,7 +119,7 @@ def run_debate(
                 agent.id,
                 "skipped",
                 {
-                    "model": selected_models.get(agent.id, ""),
+                    "model": models.get(agent.id, ""),
                     "error": "성공한 Round 1 답변이 2개 미만입니다.",
                 },
             )
@@ -136,7 +138,7 @@ def run_debate(
             answers,
             critiques,
             failures,
-            selected_models,
+            models,
             status_callback,
         )
     )
@@ -155,7 +157,7 @@ def run_debate(
         "preset_id": preset.id if preset else None,
         "preset_label": preset.label if preset else None,
         "judge": judge,
-        "models": selected_models,
+        "models": models,
         "round1": result_meta(round1_results),
         "round2": result_meta(round2_results),
         "summary": result_meta([summary_result])[0],
@@ -207,36 +209,6 @@ async def _run_summary(
 
 def _exit_code_for_results(results: list[RunResult]) -> int:
     return 0 if all(result.ok for result in results) else 1
-
-
-def _selected_models(
-    config: PanelConfig,
-    model_by_agent: dict[str, str] | None,
-    preset: PresetConfig | None = None,
-) -> dict[str, str]:
-    requested = {**(preset.models if preset else {}), **(model_by_agent or {})}
-    selected = {}
-    for agent in config.agents:
-        model = requested.get(agent.id, agent.default_model)
-        allowed = {option.id for option in agent.models}
-        selected[agent.id] = model if model in allowed else agent.default_model
-    return selected
-
-
-def _selected_judge(
-    config: PanelConfig,
-    judge_id: str | None,
-    preset: PresetConfig | None = None,
-) -> str:
-    requested = judge_id or (preset.judge if preset else config.judge)
-    agent_ids = {agent.id for agent in config.agents}
-    return requested if requested in agent_ids else config.judge
-
-
-def _preset_by_id(config: PanelConfig, preset_id: str | None) -> PresetConfig | None:
-    if not preset_id:
-        return None
-    return next((preset for preset in config.presets if preset.id == preset_id), None)
 
 
 def steps_meta(results_by_stage: dict[str, list[RunResult]]) -> list[dict]:

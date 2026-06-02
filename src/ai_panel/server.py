@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlparse
 from uuid import uuid4
 import webbrowser
 
-from ai_panel.config import PanelConfig
+from ai_panel.config import PanelConfig, preset_by_id, selected_judge, selected_models
 from ai_panel.panel import run_ask, run_debate
 
 
@@ -85,20 +85,20 @@ class ServerState:
         judge_id: str | None = None,
         preset_id: str | None = None,
     ) -> Job:
-        preset = _preset_by_id(self.config, preset_id)
-        selected_mode = mode or (preset["mode"] if preset else "debate")
+        preset = preset_by_id(self.config, preset_id, required=True)
+        selected_mode = mode or (preset.mode if preset else "debate")
         if selected_mode not in {"ask", "debate"}:
             raise ValueError("mode는 ask 또는 debate여야 합니다.")
-        selected_models = _selected_models(self.config, model_by_agent, preset)
-        selected_judge = _selected_judge(self.config, judge_id, preset)
-        preset_label = preset["label"] if preset else None
-        steps = _initial_steps(self.config, selected_mode, selected_models, selected_judge)
+        models = selected_models(self.config, model_by_agent, preset)
+        judge = selected_judge(self.config, judge_id, preset, required=True)
+        preset_label = preset.label if preset else None
+        steps = _initial_steps(self.config, selected_mode, models, judge)
         job = Job(
             id=uuid4().hex[:12],
             mode=selected_mode,
-            models=selected_models,
-            judge=selected_judge,
-            preset_id=preset["id"] if preset else None,
+            models=models,
+            judge=judge,
+            preset_id=preset.id if preset else None,
             preset_label=preset_label,
             status="queued",
             created_at=_now(),
@@ -112,7 +112,7 @@ class ServerState:
             self.jobs[job.id] = job
         thread = threading.Thread(
             target=self._run_job,
-            args=(job.id, selected_mode, topic, selected_models, selected_judge, job.preset_id, preset_label),
+            args=(job.id, selected_mode, topic, models, judge, job.preset_id, preset_label),
             daemon=True,
         )
         thread.start()
@@ -555,41 +555,6 @@ class PanelRequestHandler(BaseHTTPRequestHandler):
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-
-def _selected_models(
-    config: PanelConfig,
-    model_by_agent: dict[str, str] | None,
-    preset: dict | None = None,
-) -> dict[str, str]:
-    requested = {**((preset or {}).get("models", {})), **(model_by_agent or {})}
-    selected = {}
-    for agent in config.agents:
-        value = requested.get(agent.id, agent.default_model)
-        model_ids = {model.id for model in agent.models}
-        selected[agent.id] = value if isinstance(value, str) and value in model_ids else agent.default_model
-    return selected
-
-
-def _selected_judge(
-    config: PanelConfig,
-    judge_id: str | None,
-    preset: dict | None = None,
-) -> str:
-    requested = judge_id or ((preset or {}).get("judge")) or config.judge
-    agent_ids = {agent.id for agent in config.agents}
-    if requested not in agent_ids:
-        raise ValueError("judge가 agents 목록에 없습니다.")
-    return requested
-
-
-def _preset_by_id(config: PanelConfig, preset_id: str | None) -> dict | None:
-    if not preset_id:
-        return None
-    for preset in config.presets:
-        if preset.id == preset_id:
-            return asdict(preset)
-    raise ValueError("preset_id를 찾을 수 없습니다.")
 
 
 def _initial_steps(

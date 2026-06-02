@@ -218,6 +218,30 @@ class CliFlowTest(unittest.TestCase):
         self.assertIsNone(panel_run.meta["steps"][0]["error"])
         self.assertEqual(panel_run.meta["round1"][0]["stderr_chars"], len("debug log"))
 
+    def test_invalid_preset_does_not_create_run_dir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runs_dir = root / "runs"
+            config = PanelConfig(
+                agents=[
+                    AgentConfig(
+                        id="judge",
+                        command=[sys.executable, "-c", "print('ok')"],
+                        model_arg=[],
+                        models=[ModelOption(id="test-model", label="Test Model")],
+                        default_model="test-model",
+                    )
+                ],
+                judge="judge",
+                timeout_seconds=10,
+                presets=[],
+            )
+
+            with self.assertRaises(ValueError):
+                run_debate(config, "테스트 논제", runs_dir, "test", preset_id="missing")
+
+        self.assertFalse(runs_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,13 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from ai_panel.config import ConfigError, load_config
+from ai_panel.config import (
+    ConfigError,
+    load_config,
+    preset_by_id,
+    selected_judge,
+    selected_models,
+)
 
 
 class ConfigTest(unittest.TestCase):
@@ -126,6 +132,15 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.presets[0].id, "deep")
         self.assertEqual(config.presets[0].judge, "claude")
         self.assertEqual(config.presets[0].models["claude"], "opus")
+        preset = preset_by_id(config, "deep", required=True)
+        self.assertEqual(selected_judge(config, None, preset), "claude")
+        self.assertEqual(selected_judge(config, "codex", preset), "codex")
+        self.assertEqual(
+            selected_models(config, {"claude": "sonnet"}, preset),
+            {"claude": "sonnet", "codex": "gpt-5.5"},
+        )
+        with self.assertRaises(ValueError):
+            preset_by_id(config, "missing", required=True)
 
     def test_rejects_unknown_preset_model(self):
         with tempfile.TemporaryDirectory() as temp_dir:

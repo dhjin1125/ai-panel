@@ -85,6 +85,50 @@ def default_config_path(cwd: Path | None = None) -> Path:
     return base / DEFAULT_CONFIG_NAME
 
 
+def preset_by_id(
+    config: PanelConfig,
+    preset_id: str | None,
+    required: bool = False,
+) -> PresetConfig | None:
+    if not preset_id:
+        return None
+    for preset in config.presets:
+        if preset.id == preset_id:
+            return preset
+    if required:
+        raise ValueError("preset_id를 찾을 수 없습니다.")
+    return None
+
+
+def selected_models(
+    config: PanelConfig,
+    model_by_agent: dict[str, str] | None,
+    preset: PresetConfig | None = None,
+) -> dict[str, str]:
+    requested = {**(preset.models if preset else {}), **(model_by_agent or {})}
+    selected = {}
+    for agent in config.agents:
+        model = requested.get(agent.id, agent.default_model)
+        allowed = {option.id for option in agent.models}
+        selected[agent.id] = model if isinstance(model, str) and model in allowed else agent.default_model
+    return selected
+
+
+def selected_judge(
+    config: PanelConfig,
+    judge_id: str | None,
+    preset: PresetConfig | None = None,
+    required: bool = False,
+) -> str:
+    requested = judge_id or (preset.judge if preset else config.judge)
+    agent_ids = {agent.id for agent in config.agents}
+    if requested not in agent_ids:
+        if required:
+            raise ValueError("judge가 agents 목록에 없습니다.")
+        return config.judge
+    return requested
+
+
 def _parse_agent(raw: Any) -> AgentConfig:
     if not isinstance(raw, dict):
         raise ConfigError("agent 항목은 object여야 합니다.")
